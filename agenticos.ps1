@@ -289,14 +289,33 @@ if (Test-Command npm) {
     Write-Err 'npm not found'
 }
 
-# Python
+# Python - node-gyp requires it.
+# CAUTION: Windows ships 0-byte 'python.exe' / 'python3.exe' App Execution Alias
+# stubs at %LOCALAPPDATA%\Microsoft\WindowsApps that hijack the command and
+# open the Microsoft Store. Test-Command would see these as 'python installed'.
+# Actually run the interpreter and require a Python 3.x version string.
 $py = $null
-foreach ($cand in 'python','python3','py') { if (Test-Command $cand) { $py = $cand; break } }
+$pyVer = ''
+foreach ($cand in 'python','python3','py') {
+    if (Test-Command $cand) {
+        $ver = (& $cand --version 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -eq 0 -and $ver -match 'Python\s+3\.[0-9]+') {
+            $py = $cand
+            $pyVer = $ver
+            break
+        }
+    }
+}
 if ($py) {
-    Write-Ok "python       $(Get-ToolVersion $py --version)  ($py)"
+    Write-Ok "python       $pyVer  ($py)"
 } else {
+    $stub = "$env:LOCALAPPDATA\Microsoft\WindowsApps\python.exe"
+    if ((Test-Path $stub) -and ((Get-Item $stub).Length -lt 1024)) {
+        Write-Warn 'Microsoft Store python.exe alias stub detected (0-byte hijack).'
+        Write-Note 'Will be removed during auto-install to unblock node-gyp.'
+    }
     $missing += 'Python 3.x'
-    Write-Err 'python not found (node-gyp requires it)'
+    Write-Err 'python not found or Microsoft Store alias stub is blocking it'
 }
 
 # MSVC C++ Build Tools
@@ -385,7 +404,21 @@ if ($missing.Count -gt 0) {
 
     if ($needGit    -and -not (Install-Winget-Package -Id 'Git.Git'                                -Name 'Git for Windows'))       { $failed += 'Git' }
     if ($needNode   -and -not (Install-Winget-Package -Id 'OpenJS.NodeJS.LTS'                      -Name 'Node.js LTS'))           { $failed += 'Node' }
-    if ($needPython -and -not (Install-Winget-Package -Id 'Python.Python.3.12'                     -Name 'Python 3.12'))           { $failed += 'Python' }
+    if ($needPython) {
+        # Remove Store alias stubs BEFORE installing real Python so PATH resolves correctly.
+        foreach ($stub in @("$env:LOCALAPPDATA\Microsoft\WindowsApps\python.exe",
+                            "$env:LOCALAPPDATA\Microsoft\WindowsApps\python3.exe")) {
+            if (Test-Path $stub) {
+                if ((Get-Item $stub).Length -lt 1024) {
+                    Remove-Item $stub -Force -ErrorAction SilentlyContinue
+                    Write-Ok "removed Store alias stub: $stub"
+                }
+            }
+        }
+        if (-not (Install-Winget-Package -Id 'Python.Python.3.12' -Name 'Python 3.12')) {
+            $failed += 'Python'
+        }
+    }
     if ($needVS) {
         $vsOverride = '--wait --quiet --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
         if (-not (Install-Winget-Package -Id 'Microsoft.VisualStudio.2022.BuildTools' -Name 'VS 2022 Build Tools' -ExtraArgs @('--override',$vsOverride))) {
@@ -401,7 +434,16 @@ if ($missing.Count -gt 0) {
     $still = @()
     if ($needGit    -and -not (Test-Command git))    { $still += 'git' }
     if ($needNode   -and -not (Test-Command node))   { $still += 'node' }
-    if ($needPython -and -not ((Test-Command python) -or (Test-Command python3) -or (Test-Command py))) { $still += 'python' }
+    if ($needPython) {
+        $pyOk = $false
+        foreach ($cand in 'python','python3','py') {
+            if (Test-Command $cand) {
+                $v = (& $cand --version 2>&1 | Out-String).Trim()
+                if ($LASTEXITCODE -eq 0 -and $v -match 'Python\s+3\.') { $pyOk = $true; break }
+            }
+        }
+        if (-not $pyOk) { $still += 'python' }
+    }
     if ($needVS) {
         $ok = $false
         if (Test-Path $vsWhere) {
