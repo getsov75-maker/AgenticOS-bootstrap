@@ -63,6 +63,44 @@ param(
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# Keep the elevated window open on any exit so the user can read errors.
+# The parent sets AGENTICOS_ELEVATED_CHILD=1 before spawning the UAC child;
+# the child sees the env var and enables pause-on-exit. Reliable across all
+# PS/console combos (WT, conhost, VS Code).
+$script:AgenticOSPauseOnExit = ($env:AGENTICOS_ELEVATED_CHILD -eq '1')
+
+# Start a transcript so the full session is captured even if the window closes.
+if ($script:AgenticOSPauseOnExit) {
+    $script:LogPath = Join-Path $env:TEMP ("agenticos-install-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    try {
+        Start-Transcript -Path $script:LogPath -Force -IncludeInvocationHeader | Out-Null
+        Write-Host "  Transcript: $script:LogPath" -ForegroundColor DarkGray
+    } catch {
+        $script:LogPath = $null
+    }
+}
+function Exit-Agentic($code) {
+    if ($script:LogPath) {
+        try { Stop-Transcript | Out-Null } catch {}
+        Write-Host ''
+        Write-Host "  Full log saved to: $script:LogPath" -ForegroundColor Yellow
+        Write-Host '  Copy this file if you need to share the output.' -ForegroundColor DarkGray
+    }
+    if ($script:AgenticOSPauseOnExit) {
+        Write-Host ''
+        Read-Host "Press Enter to close this window (exit code $code)"
+    }
+    exit $code
+}
+trap {
+    Write-Host ''
+    Write-Host ('=' * 72) -ForegroundColor Red
+    Write-Host " UNHANDLED ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host " at: $($_.InvocationInfo.ScriptLineNumber): $($_.InvocationInfo.Line.Trim())" -ForegroundColor Red
+    Write-Host ('=' * 72) -ForegroundColor Red
+    Exit-Agentic 1
+}
+
 $RepoUrl   = 'https://github.com/patil-shubham-dev/AgenticOS.git'
 $NodeMin   = [Version]'20.0.0'
 $DiskMinGB = 8
@@ -146,21 +184,24 @@ if (-not (Test-IsAdmin) -and -not $NoElevate) {
     $srcUrl = $env:AGENTICOS_SOURCE_URL
     if ($srcUrl) {
         # Streamed via iex - refetch and pipe into elevated pwsh.
+        # Set AGENTICOS_ELEVATED_CHILD so the child pauses on exit.
         $inner = @"
 `$env:AGENTICOS_ARGS='$($forwardEnv.AGENTICOS_ARGS)';
 `$env:AGENTICOS_SOURCE_URL='$srcUrl';
+`$env:AGENTICOS_ELEVATED_CHILD='1';
 [Net.ServicePointManager]::SecurityProtocol=3072;
 iex ((New-Object Net.WebClient).DownloadString('$srcUrl'))
 "@
         $psArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-Command',$inner)
     } elseif ($PSCommandPath) {
         # Loaded from disk - re-invoke the file directly.
-        $psArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath)
-        if ($env:AGENTICOS_ARGS) { $psArgs += $env:AGENTICOS_ARGS.Split(' ') }
+        # Use -Command wrapper so we can set the pause-on-exit env var first.
+        $wrapped = "`$env:AGENTICOS_ELEVATED_CHILD='1'; & '$PSCommandPath' $($env:AGENTICOS_ARGS)"
+        $psArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-Command',$wrapped)
     } else {
         Write-Err 'Cannot self-elevate: neither $PSCommandPath nor $env:AGENTICOS_SOURCE_URL is set.'
         Write-Note 'Download the file locally and run it from an elevated shell, or pass -NoElevate.'
-        exit 1
+        Exit-Agentic 1
     }
 
     try {
@@ -169,7 +210,7 @@ iex ((New-Object Net.WebClient).DownloadString('$srcUrl'))
         exit $p.ExitCode
     } catch {
         Write-Err "UAC declined or elevation failed: $($_.Exception.Message)"
-        exit 1
+        Exit-Agentic 1
     }
 }
 if (Test-IsAdmin) { Write-Ok 'running as Administrator' } else { Write-Warn 'running WITHOUT admin (-NoElevate)' }
@@ -317,7 +358,7 @@ if ($missing.Count -gt 0 -and -not $AutoInstallPrereqs) {
     Write-Section 'Missing prerequisites - install these, then re-run'
     $missing | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
     Write-Note 'Or re-run without -NoAutoInstall to auto-install via winget.'
-    exit 1
+    Exit-Agentic 1
 }
 
 if ($missing.Count -gt 0) {
@@ -326,7 +367,7 @@ if ($missing.Count -gt 0) {
     if (-not (Test-Command winget)) {
         Write-Err 'winget is not available on this machine.'
         Write-Note 'Install "App Installer" from the Microsoft Store, then re-run.'
-        exit 1
+        Exit-Agentic 1
     }
     Write-Ok "winget       $(Get-ToolVersion winget --version)"
 
@@ -365,7 +406,7 @@ if ($missing.Count -gt 0) {
     if ($still.Count -gt 0) {
         Write-Warn ('Not on PATH in this session: ' + ($still -join ', '))
         Write-Note 'Close this window, open a fresh PowerShell, and re-run the same one-liner.'
-        exit 2
+        Exit-Agentic 2
     }
     Write-Ok 'All prerequisites now on PATH - continuing.'
 }
@@ -379,7 +420,7 @@ if ($script:LongPathsNeedsFix -or $script:GitLongPathsNeedsFix) {
     if ($script:LongPathsNeedsFix) {
         if (-not (Test-IsAdmin)) {
             Write-Err 'Admin required to set HKLM LongPathsEnabled.'
-            exit 1
+            Exit-Agentic 1
         }
         try {
             $regPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
@@ -391,7 +432,7 @@ if ($script:LongPathsNeedsFix -or $script:GitLongPathsNeedsFix) {
             }
         } catch {
             Write-Err "Failed to set LongPathsEnabled: $($_.Exception.Message)"
-            exit 1
+            Exit-Agentic 1
         }
     }
     if ($script:GitLongPathsNeedsFix -and (Test-Command git)) {
@@ -415,7 +456,7 @@ if (Test-Path $InstallRoot) {
             Write-Ok 'existing checkout updated'
         } else {
             Write-Err "$InstallRoot exists and is not a git checkout. Use -Force."
-            exit 1
+            Exit-Agentic 1
         }
     }
 } else {
@@ -445,7 +486,7 @@ foreach ($rel in $assetChecks) {
 }
 if ($assetMissing.Count -gt 0) {
     Write-Err 'Cannot proceed - asset(s) missing from checkout (upstream repo issue).'
-    exit 1
+    Exit-Agentic 1
 }
 
 # --------- 4. npm install + native rebuild --------------------------------
@@ -464,7 +505,7 @@ npm install
 if ($LASTEXITCODE -ne 0) {
     Write-Err 'npm install failed.'
     Write-Note 'Check that Python and MSVC Build Tools are on PATH; retry with `npm install --verbose`.'
-    exit 1
+    Exit-Agentic 1
 }
 Write-Ok 'dependencies installed'
 
@@ -479,7 +520,7 @@ if ($LASTEXITCODE -ne 0) {
 if ($SkipBuild) {
     Write-Section 'Done (-SkipBuild)'
     Write-Host "  cd `"$InstallRoot`"; npm run dev" -ForegroundColor Cyan
-    exit 0
+    Exit-Agentic 0
 }
 
 # --------- 5. build --------------------------------------------------------
@@ -499,7 +540,7 @@ if ($SkipTypecheck) {
     if ($LASTEXITCODE -ne 0) {
         Write-Err 'npm run dist:win failed.'
         Write-Note 'Retry with:  -SkipTypecheck  (bypasses the strict TS 6 --noEmit pass).'
-        exit 1
+        Exit-Agentic 1
     }
 }
 Write-Ok ("build completed in {0:mm\:ss}" -f ((Get-Date) - $buildStart))
@@ -521,10 +562,12 @@ if (Test-Path $releaseDir) {
     Start-Process explorer.exe $releaseDir
 } else {
     Write-Warn 'release\ not found - inspect logs above.'
-    exit 1
+    Exit-Agentic 1
 }
 
 Write-Host ''
 Write-Host '  Install:   double-click  release\AgenticOS Setup 3.0.0.exe'   -ForegroundColor Cyan
 Write-Host '  Portable:  release\AgenticOS-3.0.0-portable.exe'              -ForegroundColor Cyan
 Write-Host '  First run  ->  Settings -> Providers -> add OpenAI / Anthropic / MCP key.' -ForegroundColor DarkGray
+
+Exit-Agentic 0
