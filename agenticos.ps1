@@ -101,7 +101,12 @@ trap {
     Exit-Agentic 1
 }
 
-$RepoUrl   = 'https://github.com/patil-shubham-dev/AgenticOS.git'
+# Fork with build fixes applied - see:
+#   https://github.com/getsov75-maker/AgenticOS-patched/tree/fix/build-issues
+# Upstream (patil-shubham-dev/AgenticOS) has 5 build-blocking bugs documented in issue #10.
+# To use unpatched upstream, set: $RepoUrl='https://github.com/patil-shubham-dev/AgenticOS.git'; $RepoBranch='main'
+$RepoUrl    = 'https://github.com/getsov75-maker/AgenticOS-patched.git'
+$RepoBranch = 'fix/build-issues'
 $NodeMin   = [Version]'20.0.0'
 $DiskMinGB = 8
 
@@ -161,6 +166,7 @@ function Install-Winget-Package {
 
 Write-Section 'AgenticOS one-shot installer'
 Write-Host "  Repo         : $RepoUrl"
+Write-Host "  Branch       : $RepoBranch"
 Write-Host "  Target       : $InstallRoot"
 $modeText = if ($SkipBuild) { 'clone + install' } elseif ($SkipTypecheck) { 'dist:win (skip tsc)' } else { 'dist:win (full)' }
 Write-Host "  Mode         : $modeText"
@@ -463,8 +469,8 @@ if (Test-Path $InstallRoot) {
     New-Item -ItemType Directory -Path (Split-Path $InstallRoot -Parent) -Force | Out-Null
 }
 if (-not (Test-Path (Join-Path $InstallRoot '.git'))) {
-    git clone --depth 1 $RepoUrl $InstallRoot
-    if ($LASTEXITCODE -ne 0) { Write-Err 'git clone failed'; exit 1 }
+    git clone --depth 1 --branch $RepoBranch $RepoUrl $InstallRoot
+    if ($LASTEXITCODE -ne 0) { Write-Err 'git clone failed'; Exit-Agentic 1 }
     Write-Ok "cloned into $InstallRoot"
 }
 Set-Location $InstallRoot
