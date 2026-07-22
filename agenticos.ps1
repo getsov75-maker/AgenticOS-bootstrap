@@ -253,7 +253,11 @@ if ($py) {
 }
 
 # MSVC C++ Build Tools
-$vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+# NOTE: ${env:ProgramFiles(x86)} is a parser error because '(x86)' is not a
+# valid variable-name character sequence inside ${}. Use Get-Item instead.
+$pfx86   = (Get-Item 'Env:ProgramFiles(x86)' -ErrorAction SilentlyContinue).Value
+if (-not $pfx86) { $pfx86 = 'C:\Program Files (x86)' }
+$vsWhere = Join-Path $pfx86 'Microsoft Visual Studio\Installer\vswhere.exe'
 $hasBuildTools = $false
 if (Test-Path $vsWhere) {
     $found = & $vsWhere -latest -products '*' `
