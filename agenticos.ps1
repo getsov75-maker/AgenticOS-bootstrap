@@ -275,11 +275,14 @@ if ($hasBuildTools) {
 # Disk
 $drive  = (Get-Item $env:USERPROFILE).PSDrive.Name
 $freeGB = [math]::Round((Get-PSDrive $drive).Free / 1GB, 1)
+# NOTE: `${var}:` inside a double-quoted string is a PS 5.1 parse error
+# (the parser reads the colon as a scope-qualifier extension of the braces).
+# Use $($var): to force expression evaluation, then a plain colon literal.
 if ($freeGB -lt $DiskMinGB) {
-    Write-Err "Only ${freeGB} GB free on ${drive}: — need >= ${DiskMinGB} GB"
-    $missing += "Free disk space on ${drive}:"
+    Write-Err ("Only {0} GB free on {1}: - need >= {2} GB" -f $freeGB, $drive, $DiskMinGB)
+    $missing += ("Free disk space on {0}:" -f $drive)
 } else {
-    Write-Ok "disk         ${freeGB} GB free on ${drive}:"
+    Write-Ok ("disk         {0} GB free on {1}:" -f $freeGB, $drive)
 }
 
 # Long-path detection (fix is applied in step 1c)
