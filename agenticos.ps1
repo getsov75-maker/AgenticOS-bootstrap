@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Single-file, self-contained AgenticOS bootstrap + installer for Windows.
 
@@ -145,7 +145,7 @@ if (-not (Test-IsAdmin) -and -not $NoElevate) {
     # Determine how to re-invoke self.
     $srcUrl = $env:AGENTICOS_SOURCE_URL
     if ($srcUrl) {
-        # Streamed via iex — refetch and pipe into elevated pwsh.
+        # Streamed via iex - refetch and pipe into elevated pwsh.
         $inner = @"
 `$env:AGENTICOS_ARGS='$($forwardEnv.AGENTICOS_ARGS)';
 `$env:AGENTICOS_SOURCE_URL='$srcUrl';
@@ -154,7 +154,7 @@ iex ((New-Object Net.WebClient).DownloadString('$srcUrl'))
 "@
         $psArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-Command',$inner)
     } elseif ($PSCommandPath) {
-        # Loaded from disk — re-invoke the file directly.
+        # Loaded from disk - re-invoke the file directly.
         $psArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath)
         if ($env:AGENTICOS_ARGS) { $psArgs += $env:AGENTICOS_ARGS.Split(' ') }
     } else {
@@ -314,7 +314,7 @@ if (Test-Command git) {
 # --------- 1b. auto-install missing prereqs -------------------------------
 
 if ($missing.Count -gt 0 -and -not $AutoInstallPrereqs) {
-    Write-Section 'Missing prerequisites — install these, then re-run'
+    Write-Section 'Missing prerequisites - install these, then re-run'
     $missing | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
     Write-Note 'Or re-run without -NoAutoInstall to auto-install via winget.'
     exit 1
@@ -367,7 +367,7 @@ if ($missing.Count -gt 0) {
         Write-Note 'Close this window, open a fresh PowerShell, and re-run the same one-liner.'
         exit 2
     }
-    Write-Ok 'All prerequisites now on PATH — continuing.'
+    Write-Ok 'All prerequisites now on PATH - continuing.'
 }
 
 # --------- 1c. long-path support -----------------------------------------
@@ -444,7 +444,7 @@ foreach ($rel in $assetChecks) {
     if (Test-Path $rel) { Write-Ok $rel } else { Write-Err "missing: $rel"; $assetMissing += $rel }
 }
 if ($assetMissing.Count -gt 0) {
-    Write-Err 'Cannot proceed — asset(s) missing from checkout (upstream repo issue).'
+    Write-Err 'Cannot proceed - asset(s) missing from checkout (upstream repo issue).'
     exit 1
 }
 
@@ -468,10 +468,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Ok 'dependencies installed'
 
-Write-Note 'Explicit electron-builder install-app-deps (npmRebuild:false in config)…'
+Write-Note 'Explicit electron-builder install-app-deps (npmRebuild:false in config)...'
 npx --yes electron-builder install-app-deps
 if ($LASTEXITCODE -ne 0) {
-    Write-Warn 'install-app-deps non-zero — packaged app may crash on native import.'
+    Write-Warn 'install-app-deps non-zero - packaged app may crash on native import.'
 } else {
     Write-Ok 'native modules rebuilt for Electron'
 }
@@ -520,11 +520,11 @@ if (Test-Path $releaseDir) {
     Write-Host "  Folder: $releaseDir" -ForegroundColor Cyan
     Start-Process explorer.exe $releaseDir
 } else {
-    Write-Warn 'release\ not found — inspect logs above.'
+    Write-Warn 'release\ not found - inspect logs above.'
     exit 1
 }
 
 Write-Host ''
 Write-Host '  Install:   double-click  release\AgenticOS Setup 3.0.0.exe'   -ForegroundColor Cyan
 Write-Host '  Portable:  release\AgenticOS-3.0.0-portable.exe'              -ForegroundColor Cyan
-Write-Host '  First run  →  Settings → Providers → add OpenAI / Anthropic / MCP key.' -ForegroundColor DarkGray
+Write-Host '  First run  ->  Settings -> Providers -> add OpenAI / Anthropic / MCP key.' -ForegroundColor DarkGray
